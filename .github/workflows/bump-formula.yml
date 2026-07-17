@@ -42,6 +42,7 @@ jobs:
           echo "${sha}" | grep -Eq '^[0-9a-f]{64}$'
 
           sed -i "s|download/${current_tag}/|download/${latest_tag}/|" "${FORMULA}"
+          sed -i "s|^  version \".*\"$|  version \"${latest_tag#v}\"|" "${FORMULA}"
           sed -i "s|^  sha256 \".*\"$|  sha256 \"${sha}\"|" "${FORMULA}"
           git diff --stat
 
