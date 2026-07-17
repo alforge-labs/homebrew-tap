@@ -1,0 +1,58 @@
+# 最新 Release に formula を追随させる自動バンプ。
+# 毎日 06:00 UTC（15:00 JST）にチェックし、新バージョンがあれば PR を作成する。
+name: Bump formula
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check latest release and bump
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          RELEASE_REPO="alforge-labs/alforge-labs.github.io"
+          ASSET="alpha-forge-macos-arm64.tar.gz"
+          FORMULA="Formula/alpha-forge.rb"
+
+          latest_tag="$(gh api "repos/${RELEASE_REPO}/releases/latest" -q .tag_name)"
+          # 外部由来値はタグ形式を検証してから使う（sed/branch 名への注入防止）
+          echo "${latest_tag}" | grep -Eq '^v[0-9]+(\.[0-9]+)+$'
+          current_tag="$(grep -o 'download/v[0-9.]*' "${FORMULA}" | head -1 | cut -d/ -f2)"
+          echo "latest=${latest_tag} current=${current_tag}"
+          if [ "${latest_tag}" = "${current_tag}" ]; then
+            echo "Formula is up to date."
+            exit 0
+          fi
+
+          # 新バージョンのアセットと sha256 を検証付きで取得
+          sha_line="$(curl -sSfL "https://github.com/${RELEASE_REPO}/releases/download/${latest_tag}/${ASSET}.sha256")"
+          sha="$(echo "${sha_line}" | awk '{print $1}' | tr 'A-Z' 'a-z')"
+          echo "${sha}" | grep -Eq '^[0-9a-f]{64}$'
+
+          sed -i "s|download/${current_tag}/|download/${latest_tag}/|" "${FORMULA}"
+          sed -i "s|^  sha256 \".*\"$|  sha256 \"${sha}\"|" "${FORMULA}"
+          git diff --stat
+
+          branch="bump/${latest_tag}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${branch}"
+          git add "${FORMULA}"
+          git commit -m "chore: alpha-forge を ${latest_tag} にバンプ"
+          git push -u origin "${branch}" --force
+          gh pr create \
+            --title "chore: alpha-forge を ${latest_tag} にバンプ" \
+            --body "自動バンプ: ${RELEASE_REPO} の最新 Release ${latest_tag} に追随（sha256 は Release 添付 .sha256 から取得・形式検証済み）。" \
+            || echo "PR already exists"
