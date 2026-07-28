@@ -1,5 +1,12 @@
 # 最新 Release に formula を追随させる自動バンプ。
-# 毎日 06:00 UTC（15:00 JST）にチェックし、新バージョンがあれば PR を作成する。
+# 毎日 06:00 UTC（15:00 JST）にチェックし、新バージョンがあれば main へ直接 push する。
+#
+# PR を経由しない理由（issue #7）:
+#   リポジトリ設定の "Allow GitHub Actions to create and approve pull requests" が
+#   無効なため、GITHUB_TOKEN では gh pr create が必ず失敗する。この設定を有効に
+#   すると Actions に PR の「承認」まで許すことになり、formula 1 ファイルの機械的
+#   更新のために負う代償として釣り合わない。バンプ内容は sha256 の検証込みで
+#   完全に機械生成され、人間が見て判断する余地がないため main へ直接 push する。
 name: Bump formula
 
 on:
@@ -9,7 +16,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   bump:
@@ -27,7 +33,7 @@ jobs:
           FORMULA="Formula/alpha-forge.rb"
 
           latest_tag="$(gh api "repos/${RELEASE_REPO}/releases/latest" -q .tag_name)"
-          # 外部由来値はタグ形式を検証してから使う（sed/branch 名への注入防止）
+          # 外部由来値はタグ形式を検証してから使う（sed への注入防止）
           echo "${latest_tag}" | grep -Eq '^v[0-9]+(\.[0-9]+)+$'
           current_tag="$(grep -o 'download/v[0-9.]*' "${FORMULA}" | head -1 | cut -d/ -f2)"
           echo "latest=${latest_tag} current=${current_tag}"
@@ -44,16 +50,39 @@ jobs:
           sed -i "s|download/${current_tag}/|download/${latest_tag}/|" "${FORMULA}"
           sed -i "s|^  version \".*\"$|  version \"${latest_tag#v}\"|" "${FORMULA}"
           sed -i "s|^  sha256 \".*\"$|  sha256 \"${sha}\"|" "${FORMULA}"
+
+          # sed が 1 つでも空振りしたら「更新した」と誤認したまま終わるため、
+          # 期待する 3 行が実際に揃っているかを書き換え後の内容で検証する（issue #7）。
+          grep -qF "download/${latest_tag}/${ASSET}" "${FORMULA}"
+          grep -qxF "  version \"${latest_tag#v}\"" "${FORMULA}"
+          grep -qxF "  sha256 \"${sha}\"" "${FORMULA}"
+
+          if git diff --quiet -- "${FORMULA}"; then
+            echo "::error::${latest_tag} へのバンプが必要なのに ${FORMULA} に差分がありません。formula の書式が変わった可能性があります。"
+            exit 1
+          fi
           git diff --stat
 
-          branch="bump/${latest_tag}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "${branch}"
           git add "${FORMULA}"
           git commit -m "chore: alpha-forge を ${latest_tag} にバンプ"
-          git push -u origin "${branch}" --force
-          gh pr create \
-            --title "chore: alpha-forge を ${latest_tag} にバンプ" \
-            --body "自動バンプ: ${RELEASE_REPO} の最新 Release ${latest_tag} に追随（sha256 は Release 添付 .sha256 から取得・形式検証済み）。" \
-            || echo "PR already exists"
+          git push origin HEAD:main
+
+          echo "::notice::formula を ${latest_tag} にバンプして main へ push しました。"
+
+      - name: Verify formula matches latest release
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 前段が緑でも取りこぼしていないことを最後に必ず確かめる。
+          # 「毎日 success なのに 3 日間バンプされていなかった」（issue #7）の再発検知。
+          set -euo pipefail
+          latest_tag="$(gh api "repos/alforge-labs/alforge-labs.github.io/releases/latest" -q .tag_name)"
+          current_tag="$(grep -o 'download/v[0-9.]*' Formula/alpha-forge.rb | head -1 | cut -d/ -f2)"
+          if [ "${latest_tag}" != "${current_tag}" ]; then
+            echo "::error::formula (${current_tag}) が最新 Release (${latest_tag}) に追随していません。"
+            exit 1
+          fi
+          echo "formula は ${current_tag} で最新 Release に追随しています。"
