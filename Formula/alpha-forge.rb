@@ -4,10 +4,10 @@
 class AlphaForge < Formula
   desc "AI-agent-native backtesting engine CLI for trading strategies"
   homepage "https://alforgelabs.com"
-  url "https://github.com/alforge-labs/alforge-labs.github.io/releases/download/v1.4.0/alpha-forge-macos-arm64.tar.gz"
+  url "https://github.com/alforge-labs/alforge-labs.github.io/releases/download/v1.5.0/alpha-forge-macos-arm64.tar.gz"
   # アセット名の "arm64" を brew が版数と誤検出するため明示指定が必須（bump workflow が更新する）
-  version "1.4.0"
-  sha256 "7dc0d6109f04d5765849fb4c77ea9eda978d96d4ec16cdd7a46aefbb36837344"
+  version "1.5.0"
+  sha256 "081cd3518f08928346f546d4ec3ab4a95c228cc8f19ec3be983fa195b01b1abb"
   license :cannot_represent
 
   livecheck do
